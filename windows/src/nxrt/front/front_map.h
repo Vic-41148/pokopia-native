@@ -24,15 +24,16 @@
 
 // The keyboard map: one key position per action. Actions 0-15 are the NpadButtons in their bit order, then the left stick's four directions and the shake.
 // DM_KEYMAP=<file> (play.ps1's Controls tab writes it) replaces actions by name, "A": <SDL scancode>, ...; the layout above is the default
-enum { FRONT_ACT_STICK_UP = 16, FRONT_ACT_STICK_LEFT, FRONT_ACT_STICK_DOWN, FRONT_ACT_STICK_RIGHT, FRONT_ACT_SHAKE, FRONT_ACTS };
+enum { FRONT_ACT_STICK_UP = 16, FRONT_ACT_STICK_LEFT, FRONT_ACT_STICK_DOWN, FRONT_ACT_STICK_RIGHT, FRONT_ACT_SHAKE, FRONT_ACT_CAM_UP, FRONT_ACT_CAM_LEFT, FRONT_ACT_CAM_DOWN, FRONT_ACT_CAM_RIGHT, FRONT_ACTS };
 static const char *const front_act_names[FRONT_ACTS] = {"A", "B", "X", "Y", "LS", "RS", "L", "R", "ZL", "ZR", "Plus", "Minus", "Left", "Up", "Right", "Down",
-                                                          "StickUp", "StickLeft", "StickDown", "StickRight", "Shake"};
+                                                          "StickUp", "StickLeft", "StickDown", "StickRight", "Shake", "CamUp", "CamLeft", "CamDown", "CamRight"};
 typedef struct { SDL_Scancode key[FRONT_ACTS]; } front_keymap;
 static inline void front_keymap_default(front_keymap *m) {
     static const SDL_Scancode d[FRONT_ACTS] = {
         SDL_SCANCODE_J, SDL_SCANCODE_K, SDL_SCANCODE_U, SDL_SCANCODE_I, SDL_SCANCODE_F, SDL_SCANCODE_G, SDL_SCANCODE_Q, SDL_SCANCODE_E, SDL_SCANCODE_Z, SDL_SCANCODE_C,
         SDL_SCANCODE_RETURN, SDL_SCANCODE_TAB, SDL_SCANCODE_LEFT, SDL_SCANCODE_UP, SDL_SCANCODE_RIGHT, SDL_SCANCODE_DOWN,
-        SDL_SCANCODE_W, SDL_SCANCODE_A, SDL_SCANCODE_S, SDL_SCANCODE_D, SDL_SCANCODE_SPACE};
+        SDL_SCANCODE_W, SDL_SCANCODE_A, SDL_SCANCODE_S, SDL_SCANCODE_D, SDL_SCANCODE_SPACE,
+        SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN};
     for (int i = 0; i < FRONT_ACTS; i++) m->key[i] = d[i];
 }
 // Keys a map may not take: Esc releases the mouse, F11 is fullscreen; anything outside the keyboard's usage codes
@@ -81,18 +82,19 @@ static inline const front_keymap *front_keymap_builtin(void) {
     return &m;
 }
 
-// The keyboard: buttons held and the four stick keys
-typedef struct { uint64_t btn; int w, a, s, d; } front_kbd;
-// The NpadButton (or DM_BTN_SHAKE) a key presses under a map; 0 for none (a stick key, or no action)
+// The keyboard: buttons held and the four left-stick keys and the four camera keys
+typedef struct { uint64_t btn; int w, a, s, d, cw, ca, cs, cd; } front_kbd;
+// The NpadButton (or DM_BTN_SHAKE) a key presses under a map; 0 for none (a stick or camera key, or no action)
 static inline uint64_t front_keymap_button(const front_keymap *m, SDL_Scancode sc) {
     int a = front_keymap_action(m, sc);
-    return a < 0 || (a >= FRONT_ACT_STICK_UP && a < FRONT_ACT_SHAKE) ? 0 : a == FRONT_ACT_SHAKE ? DM_BTN_SHAKE : 1ull << a;
+    return a < 0 || (a >= FRONT_ACT_STICK_UP && a < FRONT_ACT_SHAKE) || a >= FRONT_ACT_CAM_UP ? 0 : a == FRONT_ACT_SHAKE ? DM_BTN_SHAKE : 1ull << a;
 }
 static inline uint64_t front_key_button(SDL_Scancode sc) { return front_keymap_button(front_keymap_builtin(), sc); }
 // A key event; returns 1 when the keyboard's state changed (it is a key the game takes)
 static inline int front_kbd_key_map(front_kbd *k, const front_keymap *m, SDL_Scancode sc, int down) {
     int a = front_keymap_action(m, sc);
-    int *stick = a == FRONT_ACT_STICK_UP ? &k->w : a == FRONT_ACT_STICK_LEFT ? &k->a : a == FRONT_ACT_STICK_DOWN ? &k->s : a == FRONT_ACT_STICK_RIGHT ? &k->d : NULL;
+    int *stick = a == FRONT_ACT_STICK_UP ? &k->w : a == FRONT_ACT_STICK_LEFT ? &k->a : a == FRONT_ACT_STICK_DOWN ? &k->s : a == FRONT_ACT_STICK_RIGHT ? &k->d
+               : a == FRONT_ACT_CAM_UP ? &k->cw : a == FRONT_ACT_CAM_LEFT ? &k->ca : a == FRONT_ACT_CAM_DOWN ? &k->cs : a == FRONT_ACT_CAM_RIGHT ? &k->cd : NULL;
     if (stick) { if (*stick == !!down) return 0; *stick = !!down; return 1; }
     uint64_t mk = front_keymap_button(m, sc); if (!mk) return 0;
     uint64_t b = down ? k->btn | mk : k->btn & ~mk; if (b == k->btn) return 0;
@@ -100,6 +102,8 @@ static inline int front_kbd_key_map(front_kbd *k, const front_keymap *m, SDL_Sca
 }
 static inline int front_kbd_key(front_kbd *k, SDL_Scancode sc, int down) { return front_kbd_key_map(k, front_keymap_builtin(), sc, down); }
 static inline void front_kbd_axes(const front_kbd *k, int32_t *lx, int32_t *ly) { *lx = (k->d - k->a) * DM_STICK_MAX; *ly = (k->w - k->s) * DM_STICK_MAX; }
+// The camera keys as the right stick, the Switch's way (up is positive y)
+static inline void front_kbd_raxes(const front_kbd *k, int32_t *rx, int32_t *ry) { *rx = (k->cd - k->ca) * DM_STICK_MAX; *ry = (k->cw - k->cs) * DM_STICK_MAX; }
 
 // A controller button as NpadButton; by_label: DM_PAD_FACE=labels, label = SDL_GetGamepadButtonLabel's answer for a face button
 static inline uint64_t front_pad_button(SDL_GamepadButton b, int by_label, SDL_GamepadButtonLabel label) {
@@ -171,9 +175,13 @@ static inline int front_button_names(uint64_t m, char *out, int cap) {
 // One controller input per Switch button (actions 0-15, as the keyboard's), shared by every controller. An input is one of SDL's gamepad buttons, named by
 // its place (south = the bottom face button, whatever is printed on it), or a trigger. Without a "pad" object the front end keeps the layout above
 // (front_pad_button, DM_PAD_FACE); the default map here is that same layout by place
-#define FRONT_PACTS 16
+#define FRONT_PACTS 20
+enum { FRONT_PAD_CAM_UP = 16, FRONT_PAD_CAM_LEFT, FRONT_PAD_CAM_DOWN, FRONT_PAD_CAM_RIGHT };   // the map's actions 16-19: the camera, on the right stick's directions
 enum { FRONT_IN_LT = SDL_GAMEPAD_BUTTON_COUNT, FRONT_IN_RT, FRONT_INS };   // the triggers, after SDL's buttons; -1 none
 typedef struct { int8_t in[FRONT_PACTS]; } front_padmap;
+// The controller map's action names (A..Down as the Switch buttons, then the camera); the keyboard's list covers the sticks separately
+static const char *const front_pad_act_names[FRONT_PACTS] = {"A", "B", "X", "Y", "LS", "RS", "L", "R", "ZL", "ZR", "Plus", "Minus", "Left", "Up", "Right", "Down",
+                                                              "CamUp", "CamLeft", "CamDown", "CamRight"};
 static const char *const front_in_names[FRONT_INS] = {
     [SDL_GAMEPAD_BUTTON_SOUTH] = "south", [SDL_GAMEPAD_BUTTON_EAST] = "east", [SDL_GAMEPAD_BUTTON_WEST] = "west", [SDL_GAMEPAD_BUTTON_NORTH] = "north",
     [SDL_GAMEPAD_BUTTON_BACK] = "back", [SDL_GAMEPAD_BUTTON_GUIDE] = "guide", [SDL_GAMEPAD_BUTTON_START] = "start",
@@ -187,7 +195,8 @@ static const char *const front_in_names[FRONT_INS] = {
 static inline void front_padmap_default(front_padmap *m) {
     static const int8_t d[FRONT_PACTS] = {SDL_GAMEPAD_BUTTON_EAST, SDL_GAMEPAD_BUTTON_SOUTH, SDL_GAMEPAD_BUTTON_NORTH, SDL_GAMEPAD_BUTTON_WEST,
         SDL_GAMEPAD_BUTTON_LEFT_STICK, SDL_GAMEPAD_BUTTON_RIGHT_STICK, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, FRONT_IN_LT, FRONT_IN_RT,
-        SDL_GAMEPAD_BUTTON_START, SDL_GAMEPAD_BUTTON_BACK, SDL_GAMEPAD_BUTTON_DPAD_LEFT, SDL_GAMEPAD_BUTTON_DPAD_UP, SDL_GAMEPAD_BUTTON_DPAD_RIGHT, SDL_GAMEPAD_BUTTON_DPAD_DOWN};
+        SDL_GAMEPAD_BUTTON_START, SDL_GAMEPAD_BUTTON_BACK, SDL_GAMEPAD_BUTTON_DPAD_LEFT, SDL_GAMEPAD_BUTTON_DPAD_UP, SDL_GAMEPAD_BUTTON_DPAD_RIGHT, SDL_GAMEPAD_BUTTON_DPAD_DOWN,
+        -1, -1, -1, -1};
     for (int i = 0; i < FRONT_PACTS; i++) m->in[i] = d[i];
 }
 // Inputs a map may not take: Guide (Home) belongs to the system (Steam, the Xbox Game Bar), as on the Switch
@@ -234,7 +243,7 @@ static inline int front_padmap_parse(front_padmap *m, const char *t, int *refuse
         const char *v0 = r < end && *r == '"' ? r + 1 : NULL, *v1 = v0 ? memchr(v0, '"', (size_t)(end - v0)) : NULL;
         if (!v1) { p = r; continue; }
         size_t n = (size_t)(q - p - 1), vn = (size_t)(v1 - v0);
-        for (int a = 0; a < FRONT_PACTS; a++) if (strlen(front_act_names[a]) == n && !strncmp(p + 1, front_act_names[a], n)) {
+        for (int a = 0; a < FRONT_PACTS; a++) if (strlen(front_pad_act_names[a]) == n && !strncmp(p + 1, front_pad_act_names[a], n)) {
             int none = vn == 4 && !strncmp(v0, "none", 4), in = none ? -1 : front_in_by_name(v0, vn);
             if (!none && front_in_reserved(in)) bad++; else want[a] = in;
         }
@@ -257,7 +266,7 @@ static inline int front_padmap_parse(front_padmap *m, const char *t, int *refuse
 static inline int front_padmap_json(const front_padmap *m, char *out, size_t cap) {
     int o = snprintf(out, cap, "\"pad\":  {");
     for (int a = 0; a < FRONT_PACTS && o > 0 && (size_t)o < cap; a++)
-        o += snprintf(out + o, cap - (size_t)o, "%s\"%s\": \"%s\"", a ? ", " : "", front_act_names[a], m->in[a] >= 0 && m->in[a] < FRONT_INS ? front_in_names[m->in[a]] : "none");
+        o += snprintf(out + o, cap - (size_t)o, "%s\"%s\": \"%s\"", a ? ", " : "", front_pad_act_names[a], m->in[a] >= 0 && m->in[a] < FRONT_INS ? front_in_names[m->in[a]] : "none");
     if (o > 0 && (size_t)o < cap) o += snprintf(out + o, cap - (size_t)o, "}");
     return o;
 }
@@ -273,4 +282,10 @@ static inline uint64_t front_padmap_buttons(const front_padmap *m, const uint8_t
     uint64_t b = 0;
     for (int a = 0; a < FRONT_PACTS; a++) if (m->in[a] >= 0 && m->in[a] < FRONT_INS && held[m->in[a]]) b |= 1ull << a;
     return b;
+}
+// The camera actions of the inputs held, as right-stick axes (up is positive y, as the Switch's radial)
+static inline void front_padmap_cam(const front_padmap *m, const uint8_t held[FRONT_INS], int32_t *rx, int32_t *ry) {
+    int l = m->in[FRONT_PAD_CAM_LEFT] >= 0 && held[m->in[FRONT_PAD_CAM_LEFT]], r = m->in[FRONT_PAD_CAM_RIGHT] >= 0 && held[m->in[FRONT_PAD_CAM_RIGHT]];
+    int u = m->in[FRONT_PAD_CAM_UP] >= 0 && held[m->in[FRONT_PAD_CAM_UP]], d = m->in[FRONT_PAD_CAM_DOWN] >= 0 && held[m->in[FRONT_PAD_CAM_DOWN]];
+    *rx = (r - l) * DM_STICK_MAX; *ry = (u - d) * DM_STICK_MAX;
 }

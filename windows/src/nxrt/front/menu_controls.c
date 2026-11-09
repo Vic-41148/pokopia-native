@@ -31,7 +31,12 @@ static struct {
 } C = {.capture = CAP_NONE};
 
 static const char *const c_label[FRONT_ACTS] = {"A", "B", "X", "Y", "Left stick press", "Right stick press", "L", "R", "ZL", "ZR", "+ (Plus)", "- (Minus)",
-                                                "D-pad left", "D-pad up", "D-pad right", "D-pad down", "Stick up", "Stick left", "Stick down", "Stick right", "Shake"};
+                                                "D-pad left", "D-pad up", "D-pad right", "D-pad down", "Stick up", "Stick left", "Stick down", "Stick right", "Shake",
+                                                "Camera up", "Camera left", "Camera down", "Camera right"};
+// The controller page's rows: the Switch's buttons, then the camera directions (a button can drive the camera; default none)
+static const char *const pad_label[FRONT_PACTS] = {"A", "B", "X", "Y", "Left stick press", "Right stick press", "L", "R", "ZL", "ZR", "+ (Plus)", "- (Minus)",
+                                                    "D-pad left", "D-pad up", "D-pad right", "D-pad down", "Camera up", "Camera left", "Camera down", "Camera right"};
+static const char *ct_label(int i) { return C.page ? pad_label[i] : c_label[i]; }
 // A controller input in words: by its place, and for the face buttons what player 1's controller prints there
 static const char *const in_words[FRONT_INS] = {
     [SDL_GAMEPAD_BUTTON_SOUTH] = "Bottom", [SDL_GAMEPAD_BUTTON_EAST] = "Right", [SDL_GAMEPAD_BUTTON_WEST] = "Left", [SDL_GAMEPAD_BUTTON_NORTH] = "Top",
@@ -221,7 +226,7 @@ void ct_draw(mn_list *out, const mn_panel *p, int sel) {
             continue;
         }
         if (on) mn_rect(out, x - 8 * u, y + 3 * u, L.colw + 16 * u, L.row_h - 6 * u, (L.row_h - 6 * u) / 2, RGBA(255, 244, 196, 255));
-        mn_text(out, c_label[i], x + 12 * u, y + (L.row_h - fs) / 2, fs, C_TEXT);
+        mn_text(out, ct_label(i), x + 12 * u, y + (L.row_h - fs) / 2, fs, C_TEXT);
         float kw = L.colw * 0.5f, kx = x + L.colw - kw; int waiting = C.capture == i;
         mn_rect(out, kx, y + 7 * u, kw, L.row_h - 14 * u, (L.row_h - 14 * u) / 2, waiting ? C_EDGE : on ? C_SEL : C_PILL);
         if (waiting) snprintf(v, sizeof v, "%s", C.page ? "press a button..." : "press a key...");

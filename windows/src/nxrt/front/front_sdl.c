@@ -71,8 +71,10 @@ void front_sdl_unlock(void) { ReleaseSRWLockExclusive(&g_sdl_lock); }
 
 static float env_f(const char *k, float def) { const char *e = getenv(k); return e && *e ? (float)atof(e) : def; }
 static void push(void) {
-    int32_t lx, ly; front_kbd_axes(&F.kbd, &lx, &ly);
-    dm_input_set(F.kbd.btn | F.look_btn, lx, ly, 0, 0);
+    int32_t lx, ly, krx, kry;
+    front_kbd_axes(&F.kbd, &lx, &ly);
+    front_kbd_raxes(&F.kbd, &krx, &kry);
+    dm_input_set(F.kbd.btn | F.look_btn, lx, ly, krx, kry);
 }
 
 // ---------- The keyboard map: DM_KEYMAP=<file> (play.ps1's Controls tab), else the default layout; the active one is logged ----------
@@ -162,19 +164,17 @@ static void pad_light(fpad *p) {   // the player lights; in split screen only th
     int pl = pad_player(p);
     if (!F.split) SDL_SetGamepadPlayerIndex(p->g, pl); else if (pl == 0) SDL_SetGamepadPlayerIndex(p->g, F.split - 1);
 }
-static uint64_t pad_buttons(fpad *p) {
+static uint64_t pad_buttons(fpad *p, uint8_t held[FRONT_INS]) {
     uint64_t m = 0;
-    AcquireSRWLockShared(&F.klk);
-    if (F.pad_custom) {   // the chosen map: every input by its place, the triggers past a quarter
-        uint8_t held[FRONT_INS] = {0};
+    if (F.pad_custom) {
+        AcquireSRWLockShared(&F.klk);
         for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; b++) held[b] = SDL_GetGamepadButton(p->g, (SDL_GamepadButton)b);
         held[FRONT_IN_LT] = (uint8_t)front_trigger(SDL_GetGamepadAxis(p->g, SDL_GAMEPAD_AXIS_LEFT_TRIGGER));
         held[FRONT_IN_RT] = (uint8_t)front_trigger(SDL_GetGamepadAxis(p->g, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER));
-        m = front_padmap_buttons(&F.padmap, held);
+        m = front_padmap_buttons(&F.padmap, held);   // the Switch buttons; the camera's bindings come back through held (pad_read's axes)
         ReleaseSRWLockShared(&F.klk);
         return m;
     }
-    ReleaseSRWLockShared(&F.klk);
     for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; b++)
         if (SDL_GetGamepadButton(p->g, (SDL_GamepadButton)b))
             m |= front_pad_button((SDL_GamepadButton)b, F.by_label, b <= SDL_GAMEPAD_BUTTON_NORTH ? SDL_GetGamepadButtonLabel(p->g, (SDL_GamepadButton)b) : SDL_GAMEPAD_BUTTON_LABEL_UNKNOWN);
@@ -186,10 +186,16 @@ static void check_buttons(fpad *p, uint64_t m);
 static void pad_read(fpad *p) {
     if (!F.input_on && !F.split) return;
     int pl = pad_player(p); if (pl < 0) return;
-    uint64_t m = pad_buttons(p);
+    uint8_t held[FRONT_INS] = {0};
+    uint64_t m = pad_buttons(p, held);
     int32_t lx, ly, rx, ry;
     front_stick(SDL_GetGamepadAxis(p->g, SDL_GAMEPAD_AXIS_LEFTX), SDL_GetGamepadAxis(p->g, SDL_GAMEPAD_AXIS_LEFTY), F.inner, F.outer, &lx, &ly);
     front_stick(SDL_GetGamepadAxis(p->g, SDL_GAMEPAD_AXIS_RIGHTX), SDL_GetGamepadAxis(p->g, SDL_GAMEPAD_AXIS_RIGHTY), F.inner, F.outer, &rx, &ry);
+    AcquireSRWLockShared(&F.klk);
+    if (F.pad_custom) { int32_t cx, cy; front_padmap_cam(&F.padmap, held, &cx, &cy); rx += cx; ry += cy; }   // a camera button held: add its direction to the right stick
+    ReleaseSRWLockShared(&F.klk);
+    if (rx > DM_STICK_MAX) rx = DM_STICK_MAX; if (rx < -DM_STICK_MAX) rx = -DM_STICK_MAX;
+    if (ry > DM_STICK_MAX) ry = DM_STICK_MAX; if (ry < -DM_STICK_MAX) ry = -DM_STICK_MAX;
     dm_pad_set_player(pl, m, lx, ly, rx, ry);
     if (F.check) check_buttons(p, m);
 }
@@ -442,7 +448,7 @@ static void check_tick(uint64_t now) {
     char t[400]; int o = snprintf(t, sizeof t, "%s | pad check:", F.title);
     for (int i = 0; i < NPADS; i++) {
         fpad *p = &F.pads[i]; if (!p->g) continue;
-        char held[120]; front_button_names(pad_buttons(p), held, sizeof held);
+        char held[120]; uint8_t chk_held[FRONT_INS] = {0}; front_button_names(pad_buttons(p, chk_held), held, sizeof held);
         int32_t lx, ly, rx, ry;
         front_stick(SDL_GetGamepadAxis(p->g, SDL_GAMEPAD_AXIS_LEFTX), SDL_GetGamepadAxis(p->g, SDL_GAMEPAD_AXIS_LEFTY), F.inner, F.outer, &lx, &ly);
         front_stick(SDL_GetGamepadAxis(p->g, SDL_GAMEPAD_AXIS_RIGHTX), SDL_GetGamepadAxis(p->g, SDL_GAMEPAD_AXIS_RIGHTY), F.inner, F.outer, &rx, &ry);
@@ -607,7 +613,7 @@ void front_sdl_event(const SDL_Event *e) {
     case SDL_EVENT_GAMEPAD_REMOVED: pad_removed(e->gdevice.which); break;
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN: case SDL_EVENT_GAMEPAD_BUTTON_UP: {
         fpad *p = pad_by_id(e->gbutton.which);
-        if (p && e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && front_text_pad(pad_buttons(p))) break;   // the name box is up and has the focus: a player without a keyboard accepts it here
+        if (p && e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && front_text_pad(pad_buttons(p, (uint8_t[FRONT_INS]){0}))) break;   // the name box is up and has the focus: a player without a keyboard accepts it here
         if (p) pad_read(p);
         break; }
     case SDL_EVENT_GAMEPAD_AXIS_MOTION: { fpad *p = pad_by_id(e->gaxis.which); if (p) pad_read(p); break; }
