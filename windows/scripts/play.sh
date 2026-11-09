@@ -217,15 +217,21 @@ if [ -n "$CONFIG$ASK" ]; then   # the picture, saved for this computer (display.
   # until the player picks docked or handheld in F1 -> Graphics (display.json then holds "console")
   DECK=; [ "${SteamDeck:-}" = 1 ] && DECK=1
   case "$(cat /sys/class/dmi/id/board_vendor 2>/dev/null || true)/$(cat /sys/class/dmi/id/board_name 2>/dev/null || true)" in Valve/Jupiter|Valve/Galileo) DECK=1 ;; esac
-  D_CONSOLE=$([ -n "$DECK" ] && echo 0 || echo 1) D_RES=default D_FULL=false D_WIN=1280x720 D_UPSCALE=sharp D_SHARP=0.5 D_FPS=60 D_VSYNC=true D_COUNTER=off
+  D_CONSOLE=$([ -n "$DECK" ] && echo 0 || echo 1) D_RES=default D_FULL=false D_WIN=1280x720 D_UPSCALE=sharp D_SHARP=0.5 D_FPS=60 D_VSYNC=true D_COUNTER=off D_PRESENT= D_ANISO=0 D_LOD=0
   [ -n "$PY" ] && eval "$("$PY" -I - "$SETTINGS/display.json" "$D_CONSOLE" <<'EOF'
 import json, re, shlex, sys
-d = {'console': int(sys.argv[2]), 'resolution': 'default', 'fullscreen': False, 'window': '1280x720', 'upscale': 'sharp', 'sharpness': 5, 'fps': 60, 'vsync': True, 'fps_counter': 'off'}
+d = {'console': int(sys.argv[2]), 'resolution': 'default', 'fullscreen': False, 'window': '1280x720', 'upscale': 'sharp', 'sharpness': 5, 'fps': 60, 'vsync': True,
+     'present_mode': '', 'aniso': 0, 'lod_bias': 0.0, 'fps_counter': 'off'}
 try: d.update({k: v for k, v in json.load(open(sys.argv[1], encoding='utf-8')).items() if k in d})
 except Exception: pass
 def num(v, dflt):
     try: return int(v)
     except (TypeError, ValueError): return dflt
+try: lod = float(d['lod_bias'])   # -1.0 .. +1.0 (the F1 menu's Texture bias)
+except (TypeError, ValueError): lod = 0.0
+lod = max(-1.0, min(1.0, lod))
+pm = str(d['present_mode'])   # the F1 menu's Vsync row's exact choice; the older "vsync": false was Mailbox
+if pm not in ('fifo', 'mailbox', 'immediate'): pm = '' if d['vsync'] else 'mailbox'
 r = str(d['resolution'])   # "default" or "<w>x<h>", kept as saved; a factor from before the sizes (1 / 1.5 / 2 / 3) was meant docked
 if r != 'default' and not re.fullmatch(r'\d+x\d+', r):
     try: f = float(r)
@@ -233,7 +239,8 @@ if r != 'default' and not re.fullmatch(r'\d+x\d+', r):
     h = round(1080 * f); r = f'{round(h * 16 / 9)}x{h}' if f >= 1 else 'default'
 for var, v in (('D_CONSOLE', num(d['console'], int(sys.argv[2]))), ('D_RES', r), ('D_FULL', 'true' if d['fullscreen'] else 'false'), ('D_WIN', d['window'] or ''),
                ('D_UPSCALE', d['upscale']), ('D_SHARP', f"{num(d['sharpness'], 5) / 10:g}"), ('D_FPS', num(d['fps'], 60)),
-               ('D_VSYNC', 'true' if d['vsync'] else 'false'), ('D_COUNTER', d['fps_counter'] if d['fps_counter'] in ('off', 'corner', 'detailed') else 'off')):
+               ('D_VSYNC', 'true' if d['vsync'] else 'false'), ('D_PRESENT', pm), ('D_ANISO', max(0, min(16, num(d['aniso'], 0)))),
+               ('D_LOD', f'{lod:g}'), ('D_COUNTER', d['fps_counter'] if d['fps_counter'] in ('off', 'corner', 'detailed', 'graph') else 'off')):
     print(f'{var}={shlex.quote(str(v))}')
 EOF
 )"
@@ -244,7 +251,10 @@ EOF
   [ -z "${NXRT_VK_UPSCALE:-}" ] && export NXRT_VK_UPSCALE=$D_UPSCALE
   [ -z "${NXRT_VK_SHARPNESS:-}" ] && export NXRT_VK_SHARPNESS=$D_SHARP
   [ -z "${DM_FPS:-}" ] && [ "$D_FPS" = 30 ] && export DM_FPS=30
-  [ -z "${NXRT_VK_PRESENT:-}" ] && [ "$D_VSYNC" = false ] && export NXRT_VK_PRESENT=mailbox
+  [ -z "${NXRT_FPS_UNCAPPED:-}" ] && [ "$D_FPS" = "0" ] && export NXRT_FPS_UNCAPPED=1
+  [ -z "${NXRT_VK_PRESENT:-}" ] && [ -n "$D_PRESENT" ] && export NXRT_VK_PRESENT=$D_PRESENT
+  [ -z "${NXRT_VK_ANISO:-}" ] && [ "$D_ANISO" != 0 ] && export NXRT_VK_ANISO=$D_ANISO
+  [ -z "${NXRT_VK_LOD:-}" ] && [ "$D_LOD" != "0" ] && export NXRT_VK_LOD=$D_LOD
   [ -z "${NXRT_FPS_COUNTER:-}" ] && [ "$D_COUNTER" != off ] && export NXRT_FPS_COUNTER=$D_COUNTER
 fi
 [ -n "$WINDOW" ] && export NXRT_VK_WINDOW=$WINDOW
@@ -282,7 +292,7 @@ if [ -n "$DRYRUN" ]; then
   [ -n "${DM_KEYMAP:-}" ] && echo "keys: DM_KEYMAP=$DM_KEYMAP"
   echo "display: DM_OPMODE=${DM_OPMODE:-} NXRT_VK_SCALE=${NXRT_VK_SCALE:-} NXRT_VK_RESOLUTION=${NXRT_VK_RESOLUTION:-} NXRT_VK_WINDOW=${NXRT_VK_WINDOW:-}" \
        "NXRT_VK_FULLSCREEN=${NXRT_VK_FULLSCREEN:-} NXRT_VK_UPSCALE=${NXRT_VK_UPSCALE:-} NXRT_VK_SHARPNESS=${NXRT_VK_SHARPNESS:-} DM_FPS=${DM_FPS:-}" \
-       "NXRT_VK_PRESENT=${NXRT_VK_PRESENT:-} NXRT_FPS_COUNTER=${NXRT_FPS_COUNTER:-} NXRT_SETTINGS_DIR=$NXRT_SETTINGS_DIR"
+       "NXRT_VK_PRESENT=${NXRT_VK_PRESENT:-} NXRT_VK_ANISO=${NXRT_VK_ANISO:-} NXRT_VK_LOD=${NXRT_VK_LOD:-} NXRT_FPS_COUNTER=${NXRT_FPS_COUNTER:-} NXRT_SETTINGS_DIR=$NXRT_SETTINGS_DIR"
   exit 0
 fi
 echo "Pokopia: keyboard WASD move, mouse look (click the picture; Esc releases the mouse), J/K/U/I = A/B/X/Y, Return = +, Tab = -, F11 fullscreen, F1 the menu."
