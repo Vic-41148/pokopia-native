@@ -121,6 +121,8 @@ typedef struct { float row_h, colw, p1y, gy, pill; } lay;
 static void layout(const mn_panel *p, lay *L) {
     L->row_h = 46 * p->u; L->colw = (p->pw - 96 * p->u - 32 * p->u) / 2; L->pill = 220 * p->u;
     L->p1y = p->y0 + 58 * p->u; L->gy = C.page ? L->p1y + 58 * p->u : p->y0 + 58 * p->u;
+    float avail = p->py + p->ph - 150 * p->u - L->gy;   // from the grid's first row to above the hint text
+    if (lines() * L->row_h > avail) L->row_h = avail / lines() < 24 * p->u ? 24 * p->u : avail / lines();   // the camera rows made the grid long: compress the rows to fit
 }
 static void cell(const mn_panel *p, const lay *L, int i, float *x, float *y) { *x = p->px + 48 * p->u + (i / lines()) * (L->colw + 32 * p->u); *y = L->gy + (i % lines()) * L->row_h; }
 // The row under the mouse (and for the page switch which page), -1 none
