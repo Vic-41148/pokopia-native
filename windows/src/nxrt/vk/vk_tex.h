@@ -45,6 +45,7 @@ void vkt_drop_pool(const void *pool);
 void vkt_reg_tex(int id, const tex_t *t, const view_t *v, int image);
 void vkt_reg_tex_gone(int id);
 void vkt_reg_samp(int id, const samp_par *p);
+void vkt_set_filter(float aniso_min, float lod_bias);   // the in-game menu's Anisotropic and Texture bias rows
 void vkt_set_pool_n(int n);
 void vkt_read_texels(const tex_t *t, unsigned level, unsigned layer0, const NVNcopyRegion *r, uint8_t *dst, size_t row, size_t img);
 

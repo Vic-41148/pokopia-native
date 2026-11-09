@@ -230,9 +230,9 @@ uint64_t gfx_drawable_ns_take(void) { return 0; }
 void gfx_bw(uint64_t *load, uint64_t *store, uint64_t *full_rw_passes) { *load = *store = *full_rw_passes = 0; }
 uint64_t gfx_udc_saved_bytes(void) { return 0; }
 int gfx_has_window(void) { return vkw_is_open(); }
-static _Atomic int g_fps = 0;   // 30 or 60; DM_FPS at the first ask, then the in-game menu's choice (vk_set_fps_target)
-int gfx_fps_target(void) { int v = atomic_load(&g_fps); if (!v) { const char *e = getenv("DM_FPS"); v = e && atoi(e) == 30 ? 30 : 60; int z = 0; atomic_compare_exchange_strong(&g_fps, &z, v); v = atomic_load(&g_fps); } return v; }
-void vk_set_fps_target(int fps) { atomic_store(&g_fps, fps == 30 ? 30 : 60); }
+static _Atomic int g_fps = -1;   // 30 or 60, 0 = the limiter off (the game's own interval alone); DM_FPS at the first ask, then the in-game menu's choice (vk_set_fps_target)
+int gfx_fps_target(void) { int v = atomic_load(&g_fps); if (v < 0) { const char *e = getenv("DM_FPS"); v = e && atoi(e) == 30 ? 30 : 60; int z = -1; atomic_compare_exchange_strong(&g_fps, &z, v); v = atomic_load(&g_fps); } return v; }
+void vk_set_fps_target(int fps) { atomic_store(&g_fps, fps == 30 ? 30 : fps == 0 ? 0 : 60); }
 int gfx_warm_wait(int timeout_ms) { (void)timeout_ms; return 1; }
 // No display link: the recording layer paces the game on its own clock (as with the null backend) and FIFO presentation follows the display
 int gfx_link_active(void) { return 0; }

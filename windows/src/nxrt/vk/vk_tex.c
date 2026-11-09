@@ -24,6 +24,14 @@ int vkt_pool_n(void) { return g_pool_n; }
 static uint64_t g_frame;
 static _Atomic uint64_t s_same, s_same_bytes, s_hash_ns;   // re-uploads skipped because the storage held the same bytes
 static _Atomic uint64_t s_images, s_bytes, s_uploads, s_reuploads, s_up_bytes, s_up_ns, s_shared, s_astc_fast, s_astc_high, s_cpuw, s_evicted, s_samplers;
+// The in-game menu's filtering (menu.c's Anisotropic and Texture bias rows): the least anisotropy on every sampler (0 keeps the game's own) and a LOD bias
+// added to each. Applied in vkt_sampler before the cache lookup, so a change makes new samplers and the old ones age out
+static _Atomic float g_af_min, g_lod_add;
+void vkt_set_filter(float aniso_min, float lod_bias) {
+    float af = atomic_load(&g_af_min), lb = atomic_load(&g_lod_add);
+    atomic_store(&g_af_min, aniso_min); atomic_store(&g_lod_add, lod_bias);
+    if (aniso_min != af || lod_bias != lb) VKLOG("filtering from the in-game menu: anisotropic %s, texture bias %+.1f", aniso_min > 1 ? "on" : "off", lod_bias);
+}
 // ASTC levels / layers still at the fast pass: where their high-quality data goes
 typedef struct { vka_key key; vkt_image *im; uint32_t level, layer, w, h, slices; } upgrade_t;
 static upgrade_t *g_upg; static int g_nupg, g_cupg;
@@ -66,7 +74,7 @@ static void key_of(const tex_t *t, int cls, skey *k) { key_from(t->pool, t->off,
 // (g_noscale), as Ryujinx's resolution scaling blacklists a texture. NULL: scaled, else why not
 static float g_scale = 1.0f; static _Atomic uint32_t g_scale_req;   // the factor; one the in-game menu asked for (float bits, 0 = none)
 float vkt_scale(void) { return g_scale; }
-static float scale_clamp(float s) { return s > 1.01f && s <= 4.0f ? s : 1.0f; }
+static float scale_clamp(float s) { return s >= 0.12f && s <= 4.0f ? s : 1.0f; }   // below 1 renders under the game's own size; the floor keeps 144p on (144/1080)
 static int init_fill_src(const tex_t *t, const vkf_info *fi);
 static const char *scale_wanted(const tex_t *t, const vkf_info *fi, int cls, VkImageUsageFlags u) {
     if (cls != VKT_GPU) return "its content comes from guest memory";
@@ -570,7 +578,11 @@ static VkSamplerAddressMode wrap(uint8_t w) {
     default: return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;   // CLAMP (GL's half-border clamp) and CLAMP_TO_EDGE
     }
 }
-VkSampler vkt_sampler(const samp_par *p) {
+VkSampler vkt_sampler(const samp_par *pin) {
+    samp_par q = *pin;   // the menu's filtering becomes part of the key: a change makes new samplers
+    float af = atomic_load(&g_af_min); if (af > 1.0f && q.aniso < af) q.aniso = af;
+    float lb = atomic_load(&g_lod_add); if (lb) q.lod_bias += lb;
+    const samp_par *p = &q;
     AcquireSRWLockExclusive(&g_lk);
     VkSampler s = (VkSampler)vk_hm_get(&g_samp, p);
     if (s) { ReleaseSRWLockExclusive(&g_lk); return s; }

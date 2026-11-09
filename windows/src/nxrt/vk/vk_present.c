@@ -394,7 +394,7 @@ void vkp_shutdown(void) {
 void vkp_set_resolver(vkp_resolve_fn fn) { g_p.resolve = fn; }
 // The in-game menu's live settings: the upscaler and its sharpness (the next present), vsync (the swapchain is made again with the new mode)
 void vkp_set_upscale(int sharp, float sharpness) { g_p.sharp = sharp; g_p.sharpness = sharpness < 0 ? 0 : sharpness > 1 ? 1 : sharpness; }
-void vkp_set_mode(int mode) { if (mode != g_p.want_mode) { g_p.want_mode = mode; g_p.stale = 1; VKLOG("present: vsync %s from the in-game menu", mode == VKP_FIFO ? "on" : "off"); } }
+void vkp_set_mode(int mode) { if (mode != g_p.want_mode) { g_p.want_mode = mode; g_p.stale = 1; VKLOG("present %s from the in-game menu", mode == VKP_FIFO ? "mode FIFO (vsync)" : mode == VKP_MAILBOX ? "mode MAILBOX (no vsync)" : "mode IMMEDIATE (uncapped, may tear)"); } }
 
 uint64_t vkp_enqueue(uint64_t serial, double period, uint64_t wait_value, const int crop[4], int flags) {
     if (!g_p.thread) return 0;

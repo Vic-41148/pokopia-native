@@ -1473,8 +1473,9 @@ uint64_t nxrt_nvn_texture_busy_until(int idx) {
 // at 30 Hz then (nvn_mtl.m mtl_fps_target), which holds the game's acquires; here each frame stays on screen two vsyncs and the swap chain holds them the same way
 static int present_itv(const win_t *o) {
     static int last;   // the cap is read each frame: the in-game menu changes it
-    int cap = gfx_fps_target() == 30 ? 2 : 1;
+    int fps = gfx_fps_target(), cap = fps == 30 ? 2 : fps == 0 ? 0 : 1;
     if (cap != last) { if (cap == 2 || last) LOG("[nvn] frame rate cap %d: each frame stays on screen for at least %d vsync%s", cap == 2 ? 30 : 60, cap, cap > 1 ? "s" : ""); last = cap; }
+    if (cap == 0) return o->interval > 0 ? o->interval : 0;   // the limiter off: the game's own interval (0 = no wait at all)
     int itv = o->interval > 0 ? o->interval : 1;
     return itv > cap ? itv : cap;
 }
@@ -1484,7 +1485,7 @@ NVN(nvnWindowAcquireTexture, NVNwindowAcquireTextureResult, NVNwindow *w, NVNsyn
     *idx = o->ntex ? o->next++ % o->ntex : 0;
     uint64_t t0 = now_ns();
     // Vsync blocks here (real-device NVN: when every texture of the swap chain waits for the display, wait for the next one to be released), not in present: the game often presents holding a lock
-    if (gfx_link_active()) gfx_link_wait_tick(present_itv(o), 2 * present_period(o));
+    if (gfx_link_active()) { int litv = present_itv(o); if (litv > 0) gfx_link_wait_tick(litv, 2 * litv * 1000000000ull / 60); }
     else {
         uint64_t until = nxrt_nvn_texture_busy_until(*idx);
         if (until == UINT64_MAX) until = t0 + present_period(o);   // the one texture on screen with no frame after it (a swap chain of one): a frame's vsyncs
